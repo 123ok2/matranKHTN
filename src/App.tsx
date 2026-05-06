@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Trash2, Download, Undo, FileText, Redo, Wand2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { GoogleGenAI } from "@google/genai";
 
 const LEVELS = ['biet', 'hieu', 'vd'] as const;
 type Level = typeof LEVELS[number];
@@ -236,108 +235,64 @@ export default function App() {
 
   const [isAILoading, setIsAILoading] = useState(false);
 
-  const autoAllocateAI = async () => {
-    let apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) {
-      apiKey = window.prompt("Vui lòng nhập GEMINI API KEY của bạn (có thiết lập trong Vercel bằng biến VITE_GEMINI_API_KEY):");
-      if (!apiKey) {
-        alert("Cần có API Key để dùng tính năng AI.");
-        return;
-      }
-    }
-    
+  const autoAllocateData = async () => {
     setIsAILoading(true);
+    // Simulate slight delay for UI feedback
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Given the following matrix structure for an exam test:
-- Target questions counts: ${JSON.stringify(targetQs)}
-- Target points: ${JSON.stringify(targetPts)}
-- Topics and contents:
-${topics.map((t, idx) => `Topic ${idx + 1}: ${t.chuDe}\n  Contents:\n${t.noiDung.map(c => `    - ${c.id}: ${c.ten}`).join('\n')}`).join('\n')}
-
-Task: Distribute the questions for EACH content row defined above across the 3 cognitive levels (biet, hieu, vd) and 3 question types (tn: Trắc nghiệm, ds: Đúng/Sai, tl: Tự luận).
-
-Rules:
-1. "tn", "ds", "tl" values MUST be integers 0, 1, 2, 3, etc. If it is 0, use "".
-2. 1 "tn" question = 0.25 points.
-3. 1 "ds" in the table means 1 small part (0.25 pts), while 4 in the table means 1 full question (1.0 pt). The targetQs.ds_biet means FULL questions. Meaning if targetQs.ds_biet is "1", you must distribute 4 small parts across the "ds" fields in "biet" level. So the sum of all "ds" fields in "biet" must equal parseInt(targetQs.ds_biet) * 4.
-4. 1 "tl" question = 1.0 points.
-5. The total sum of "tn" across all contents in "biet" must exactly equal parseInt(targetQs.tn_biet). Same for hieu and vd.
-6. The total sum of "tl" across all contents in "biet" must exactly equal parseInt(targetQs.tl_biet). Same for hieu and vd.
-7. Distribute them logically based on common educational practices where easier questions are in 'biet' and harder in 'vd'.
-
-8. Return format: a JSON object where keys are the specific content row IDs, and values follow this structure exactly:
-{ 
-  "biet": { "tn": "string value or empty string", "ds": "string", "tl": "string" },
-  "hieu": { "tn": "string", "ds": "string", "tl": "string" },
-  "vd": { "tn": "string", "ds": "string", "tl": "string" }
-}
-
-Respond ONLY with a valid JSON object mapping each content row ID string to its distributed data object exactly matching the structure described.`;
-
-      let response;
-      let retries = 3;
-      while (retries > 0) {
-        try {
-          response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json"
-            }
-          });
-          break;
-        } catch (err: any) {
-          retries--;
-          console.warn(`Lỗi khi gọi AI, còn lại ${retries} lần thử...`, err);
-          if (retries === 0) {
-            throw err;
-          }
-          // Chờ 2 giây trước khi thử lại
-          await new Promise(res => setTimeout(res, 2000));
-        }
-      }
-      
-      if (!response) {
-         throw new Error("Không nhận được phản hồi từ AI sau nhiều lần thử.");
-      }
-      let jsonStr = response.text.trim();
-      if (!jsonStr) throw new Error("Empty response");
-      
-      // Extract json block using regex to handle conversational text wrappers
-      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-      if (jsonMatch) {
-        jsonStr = jsonMatch[1].trim();
-      }
-      
-      const aiData = JSON.parse(jsonStr);
-      
       const newTopics = JSON.parse(JSON.stringify(topics));
-      for (const t of newTopics) {
-        for (const c of t.noiDung) {
-          if (aiData[c.id]) {
-            const data = aiData[c.id];
-            LEVELS.forEach(lvl => {
-              if (data[lvl]) {
-                ['tn', 'ds', 'tl'].forEach(type => {
-                  let val = data[lvl][type];
-                  if (typeof val === 'string' && val.trim() === '') {
-                    c[lvl][type] = '';
-                  } else if (val !== undefined && val !== null && val !== '') {
-                    c[lvl][type] = Number(val);
-                  } else {
-                    c[lvl][type] = '';
-                  }
-                });
-              }
-            });
+      let allContents = newTopics.flatMap((t: any) => t.noiDung);
+      const N = allContents.length;
+      
+      if (N === 0) {
+         alert("Vui lòng thêm ít nhất một nội dung để phân bổ.");
+         setIsAILoading(false);
+         return;
+      }
+
+      // Reset all contents to empty BEFORE allocating
+      allContents.forEach((c: any) => {
+        c.biet = { tn: "", ds: "", tl: "" };
+        c.hieu = { tn: "", ds: "", tl: "" };
+        c.vd = { tn: "", ds: "", tl: "" };
+      });
+
+      const distribute = (type: 'tn' | 'ds' | 'tl', level: Level) => {
+        const rawTarget = parseInt(targetQs[`${type}_${level}`] as string) || 0;
+        const target = type === 'ds' ? rawTarget * 4 : rawTarget;
+        
+        if (target <= 0) return;
+
+        let indices = Array.from({length: N}, (_, i) => i);
+        // Shuffle indices using Fisher-Yates
+        for (let i = indices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+
+        const base = Math.floor(target / N);
+        const remainder = target % N;
+
+        for (let i = 0; i < N; i++) {
+          const count = base + (i < remainder ? 1 : 0);
+          if (count > 0) {
+             const contentIndex = indices[i];
+             allContents[contentIndex][level][type] = count.toString();
           }
         }
-      }
+      };
+
+      LEVELS.forEach(level => {
+        ['tn', 'ds', 'tl'].forEach(type => {
+          distribute(type as any, level);
+        });
+      });
+
       setTopicsWithHistory(newTopics);
     } catch (err: any) {
       console.error(err);
-      alert("Lỗi khi dùng AI phân bổ: " + (err.message || "Vui lòng thử lại."));
+      alert("Lỗi khi tự phân bổ: " + (err.message || "Vui lòng thử lại."));
     } finally {
       setIsAILoading(false);
     }
@@ -469,9 +424,9 @@ Respond ONLY with a valid JSON object mapping each content row ID string to its 
         <div className="p-4 border-b flex flex-wrap gap-4 justify-between items-center hide-on-print bg-gray-50">
           <h1 className="text-xl font-bold">Ma trận Đề kiểm tra</h1>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={autoAllocateAI} disabled={isAILoading} className="bg-purple-600 hover:bg-purple-700 text-white">
+            <Button onClick={autoAllocateData} disabled={isAILoading} className="bg-purple-600 hover:bg-purple-700 text-white">
               {isAILoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin"/> : <Wand2 className="w-4 h-4 mr-2"/>} 
-              AI Tự động phân bổ
+              Tự động phân bổ
             </Button>
             <Button onClick={clearAllData} variant="destructive" className="bg-red-600 hover:bg-red-700 text-white">
               <Trash2 className="w-4 h-4 mr-2"/> Làm mới dữ liệu
