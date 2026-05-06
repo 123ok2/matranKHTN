@@ -275,14 +275,32 @@ Rules:
 
 Respond ONLY with a valid JSON object mapping each content row ID string to its distributed data object exactly matching the structure described.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
+      let response;
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          response = await ai.models.generateContent({
+            model: "gemini-1.5-flash",
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+          break;
+        } catch (err: any) {
+          retries--;
+          console.warn(`Lỗi khi gọi AI, còn lại ${retries} lần thử...`, err);
+          if (retries === 0) {
+            throw err;
+          }
+          // Chờ 2 giây trước khi thử lại
+          await new Promise(res => setTimeout(res, 2000));
         }
-      });
+      }
       
+      if (!response) {
+         throw new Error("Không nhận được phản hồi từ AI sau nhiều lần thử.");
+      }
       let jsonStr = response.text.trim();
       if (!jsonStr) throw new Error("Empty response");
       
