@@ -237,14 +237,18 @@ export default function App() {
   const [isAILoading, setIsAILoading] = useState(false);
 
   const autoAllocateAI = async () => {
-    if (!process.env.GEMINI_API_KEY) {
-      alert("Không tìm thấy GEMINI_API_KEY. Vui lòng thiết lập môi trường.");
-      return;
+    let apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      apiKey = window.prompt("Vui lòng nhập GEMINI API KEY của bạn (có thiết lập trong Vercel bằng biến VITE_GEMINI_API_KEY):");
+      if (!apiKey) {
+        alert("Cần có API Key để dùng tính năng AI.");
+        return;
+      }
     }
     
     setIsAILoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       const prompt = `Given the following matrix structure for an exam test:
 - Target questions counts: ${JSON.stringify(targetQs)}
 - Target points: ${JSON.stringify(targetPts)}
@@ -272,7 +276,7 @@ Rules:
 Respond ONLY with a valid JSON object mapping each content row ID string to its distributed data object exactly matching the structure described.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-2.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
